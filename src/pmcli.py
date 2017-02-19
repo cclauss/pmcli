@@ -3,9 +3,10 @@
 import curses as crs
 from os.path import exists, expanduser, join, isfile
 import json
+from output_writer import Output
 from music_objects import Song, Artist, Album, Queue
 from util import (
-    addstr, to_string, leave, measure_fields, trunc, error_msg, initialize, api
+    to_string, leave, measure_fields, trunc, initialize, api
 )
 import warnings
 
@@ -38,7 +39,7 @@ def transition(input):
 
     arg = None
     if content is None:
-        addstr(infobar, 'Now playing: None')
+        output.reset_now_playing()
 
     try:
         command, arg = input.split(maxsplit=1)
@@ -52,25 +53,24 @@ def transition(input):
             display()
 
     else:
-        error_msg(outbar, 'Nonexistent command.')
+        output.error_msg('Nonexistent command.')
 
 
 def get_input():
     """Get user input in the bottom bar."""
-    addstr(inbar, '> ')
+    output.show_input_prompt()
     crs.curs_set(2)  # Show the cursor.
 
     try:
-        input = inbar.getstr()
+        input = output.get_input()
 
     except KeyboardInterrupt:
-        addstr(outbar, 'Goodbye, thanks for using pmcli!')
+        output.outbar_msg('Goodbye, thanks for using pmcli!')
         leave(1)
 
-    inbar.deleteln()
     crs.curs_set(0)  # Hide the cursor.
 
-    return input.decode('utf-8')
+    return input
 
 
 def get_option(num, limit=-1):
@@ -102,7 +102,11 @@ def get_option(num, limit=-1):
 
 def display():
     """Update the main window with some content."""
-    main.erase()
+    try:
+        main.erase()
+    except NameError:
+        return
+
     y, i = 0, 1  # y coordinate in main window, current item index.
     (index_chars, name_chars, artist_chars, album_chars, name_start,
      artist_start, album_start) = measure_fields(main.getmaxyx()[1])
@@ -192,17 +196,17 @@ def enqueue(arg=None):
 
     if arg is None:
         if not queue:  # Nothing to display.
-            error_msg(outbar, 'The queue is empty.')
+            output.error_msg('The queue is empty.')
 
         else:  # Display the queue.
             content = queue.collect()
 
     elif content is None:  # Nothing to queue.
-        error_msg(outbar, 'Wrong context for queue.')
+        output.error_msg('Wrong context for queue.')
 
     else:
         if arg is 'c':  # Clear the queue.
-            addstr(outbar, 'Cleared queue.')
+            output.outbar_msg('Cleared queue.')
             queue.clear()
 
         else:
@@ -214,36 +218,37 @@ def enqueue(arg=None):
                 try:
                     nums = [int(i) for i in arg.split()]
                 except ValueError:
-                    error_msg(outbar, 'Invalid argument to queue.')
+                    output.error_msg('Invalid argument to queue.')
                 else:  # Add all arguments to the queue.
                     count = 0
                     for num in nums:
                         count = count + 1 if enqueue(num) else count
-                    addstr(outbar, 'Added %d item%s to the queue.' %
-                           (count, '' if count == 1 else 's'))
+                    output.outbar_msg('Added %d item%s to the queue.' %
+                                      (count, '' if count == 1 else 's'))
 
             else:
                 opt = get_option(num)
                 if opt is not None:
                     if opt['kind'] == 'artist':  # Artists can't be queued.
-                        error_msg(outbar,
-                                  'Can only add songs or albums to the queue.')
+                        output.error_msg(
+                            'Can only add songs or albums to the queue.')
 
                     elif opt['id'] in queue.ids:  # Duplicate entry.
-                        error_msg(outbar, '\'%s\' is already in the queue.' %
-                                  to_string(opt))
+                        output.error_msg('\'%s\' is already in the queue.' %
+                                         to_string(opt))
 
                     else:  # Valid  input.
-                        addstr(outbar, 'Adding \'%s\' to the queue...' %
-                               to_string(opt))
+                        output.outbar_msg('Adding \'%s\' to the queue...' %
+                                          to_string(opt))
                         queue.append(opt)
-                        addstr(outbar, 'Added \'%s\' to the queue.' %
-                               to_string(opt))
+                        output.outbar_msg('Added \'%s\' to the queue.' %
+                                          to_string(opt))
                         return True
 
                 else:  # num out of range.
-                    error_msg(outbar, 'Invalid number. Valid between 1-%d.' %
-                              sum([len(content[k]) for k in content.keys()]))
+                    output.error_msg('Invalid number. Valid between 1-%d.' %
+                                     sum([len(content[k])
+                                          for k in content.keys()]))
 
 
 def expand(num=None):
@@ -256,30 +261,30 @@ def expand(num=None):
     global content
 
     if num is None:  # No argument.
-        error_msg(outbar, 'Missing argument to play.')
+        output.error_msg('Missing argument to play.')
 
     elif content is None:  # Nothing to expand.
-        error_msg(outbar, 'Wrong context for expand.')
+        output.error_msg('Wrong context for expand.')
 
     else:
         try:
             num = int(num)
 
         except ValueError:  # num needs to be an int.
-            error_msg(outbar, 'Invalid argument to play.')
+            output.error_msg('Invalid argument to play.')
 
         else:
             limit = int((main.getmaxyx()[0] - 6)/3)
             opt = get_option(num, limit)
 
             if opt is not None:  # Valid input.
-                addstr(outbar, 'Loading \'%s\'...' % to_string(opt))
+                output.outbar_msg('Loading \'%s\'...' % to_string(opt))
                 content = opt.collect(limit=limit)
                 outbar.erase()
                 outbar.refresh()
 
             else:  # num out of range.
-                error_msg(outbar, 'Invalid number. Valid between 1-%d.' %
+                output.error_msg('Invalid number. Valid between 1-%d.' %
                           sum([len(content[k]) for k in content.keys()]))
 
 
@@ -291,27 +296,7 @@ def help(arg=0):
     arg=0: Irrelevant.
     """
     global content
-    # Don't use generic addstr() because we don't want to call trunc() here.
-    main.erase()
-    main.addstr(
-        """
-        Commands:
-        s/search search-term: Search for search-term
-        e/expand 123: Expand item number 123
-        p/play: Play current queue
-        p/play s: Shuffle and play current queue
-        p/play 123: Play item number 123
-        q/queue: Show current queue
-        q/queue 123:  Add item number 123 to queue
-        q/queue 1 2 3:  Add items 1, 2, 3 to queue
-        q/queue c:  Clear the current queue
-        w/write file-name: Write current queue to file file-name
-        r/restore file-name: Replace current queue with playlist from file-name
-        h/help: Show this help message
-        Ctrl-C: Exit pmcli
-        """
-    )
-    main.refresh()
+    output.show_help()
     content = None
 
 
@@ -327,41 +312,39 @@ def play(arg=None):
 
     if arg is None or arg is 's':
         if not queue:  # Can't play an empty queue.
-            error_msg(outbar, 'The queue is empty.')
+            output.error_msg('The queue is empty.')
 
         else:  # Play the queue.
             if arg is 's':  # Shuffle.
                 queue.shuffle()
             content = queue.collect()
             display()
-            addstr(outbar, '[spc] pause [q] stop [n] next [9-0] volume')
+            output.outbar_msg('[spc] pause [q] stop [n] next [9-0] volume')
             queue.play(infobar)
-            outbar.erase()  # Remove trailing output.
-            outbar.refresh()
+            output.outbar_erase()
 
     elif content is None:  # Nothing to play.
-        error_msg(outbar, 'Wrong context for play.')
+        output.error_msg('Wrong context for play.')
 
     else:
         try:
             num = int(arg)
 
         except ValueError:  # arg needs to be an int if it isn't 's'.
-            error_msg(outbar, 'Invalid argument to play.')
+            output.error_msg('Invalid argument to play.')
 
         else:
             opt = get_option(num)
 
             if opt is not None:  # Valid input.
-                addstr(outbar, '[spc] pause [q] stop [n] next [9-0] volume')
+                output.outbar_msg('[spc] pause [q] stop [n] next [9-0] volume')
                 opt.play(infobar)
-                addstr(infobar, 'Now playing: None')
-                outbar.erase()
-                outbar.refresh()
+                output.reset_now_playing()
 
             else:  # num out of range.
-                error_msg(outbar, 'Invalid number. Valid between 1-%d' %
-                          sum([len(content[k]) for k in content.keys()]))
+                output.error_msg(
+                    'Invalid number. Valid between 1-%d' %
+                    sum([len(content[k]) for k in content.keys()]))
 
 
 def restore(fn=None):
@@ -373,19 +356,19 @@ def restore(fn=None):
       File should be at ~/.local/share/pmcli/playlists/.
     """
     if fn is None:  # No argument.
-        error_msg(outbar, 'Missing argument to restore.')
+        output.error_msg('Missing argument to restore.')
         return
 
     path = join(expanduser('~'), '.local', 'share', 'pmcli', 'playlists')
     if not isfile(join(path, fn)):  # Playlist file doesn't exist.
-        error_msg(outbar, '%s does not exist.' % fn)
+        output.error_msg('%s does not exist.' % fn)
         return
 
-    addstr(outbar, 'Restoring queue from %s...' % fn)
+    output.outbar_msg('Restoring queue from %s...' % fn)
     try:  # Read the playlist.
         json_songs = json.loads(open(join(path, fn)).read())
     except json.decoder.JSONDecodeError:  # Bad file.
-        error_msg(outbar, '%s is not a valid playlist file.' % fn)
+        output.error_msg('%s is not a valid playlist file.' % fn)
         return
 
     songs = []
@@ -397,8 +380,8 @@ def restore(fn=None):
     del queue[:]
     del queue.ids[:]
     queue.extend(songs)
-    addstr(outbar, 'Restored %d/%d songs from playlist %s.' %
-           (len(songs), len(json_songs), fn))
+    output.outbar_msg('Restored %d/%d songs from playlist %s.' %
+                      (len(songs), len(json_songs), fn))
 
 
 def search(query=None):
@@ -418,11 +401,10 @@ def search(query=None):
 
     # Fetch as many results as we can display depending on terminal height.
     limit = int((main.getmaxyx()[0] - 3)/3)
-    addstr(outbar, 'Searching for \'%s\'...' % query)
+    output.outbar_msg('Searching for \'%s\'...' % query)
     result = api.search(query, max_results=limit)
 
-    outbar.erase()  # Remove trailing output.
-    outbar.refresh()
+    output.outbar_erase()
 
     # 'class' => class of MusicObject
     # 'hits' => key in search result
@@ -471,29 +453,30 @@ def write(fn=None):
       File is stored at ~/.local/share/pmcli/playlists/.
     """
     if not queue:  # Can't save an empty queue.
-        error_msg(outbar, 'Queue is empty.')
+        output.error_msg('Queue is empty.')
         return
 
     if fn is None:  # No argument.
-        error_msg(outbar, 'Missing argument to write.')
+        output.error_msg('Missing argument to write.')
         return
 
     path = join(expanduser('~'), '.local', 'share', 'pmcli', 'playlists')
     if not exists(path):  # No playlists directory.
-        error_msg(outbar, 'Path to playlists does not exist.')
+        output.error_msg('Path to playlists does not exist.')
 
     elif exists(join(path, fn)):
-        error_msg(outbar, 'Playist %s already exists.' % fn)
+        output.error_msg('Playist %s already exists.' % fn)
 
     else:  # Write the playlist.
         with open(join(path, fn), 'a') as f:
             json.dump(queue, f)
-        addstr(outbar, 'Wrote queue to %s.' % fn)
+        output.outbar_msg('Wrote queue to %s.' % fn)
 
 
 if __name__ == '__main__':
     colour, main, inbar, infobar, outbar = initialize()
-    addstr(infobar, 'Enter \'h\' or \'help\' if you need help.')
+    output = Output(main, inbar, infobar, outbar)
+    output.help_prompt()
     queue = Queue()
     global content
     content = None

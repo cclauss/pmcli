@@ -1,6 +1,7 @@
 from subprocess import call
-from util import to_string, addstr, time_from_ms, api
+from util import to_string, time_from_ms, api
 from random import shuffle
+from pmcli import output
 
 
 class MusicObject(dict):
@@ -23,7 +24,7 @@ class MusicObject(dict):
         self['full'] = full
 
     @staticmethod
-    def play(win, songs):
+    def play(songs):
         """
         Play some songs.
 
@@ -40,8 +41,8 @@ class MusicObject(dict):
 
         for song in songs:
             url = api.get_stream_url(song[0])
-            addstr(win, 'Now playing: %s (%s)' %
-                   (song[1], song[2]))
+            output.infobar_msg('Now playing: %s (%s)' %
+                               (song[1], song[2]))
 
             if call(
                     ['mpv', '--really-quiet', '--input-conf', conf_path, url]
@@ -416,7 +417,7 @@ class Queue(list):
         del self.ids[:]
 
         index = MusicObject.play(win, songs)
-        addstr(win, 'Now playing: None')
+        output.reset_now_playing()
 
         for item in cache[index:]:
             self.append(item)

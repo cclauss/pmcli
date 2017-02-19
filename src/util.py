@@ -3,34 +3,9 @@ import curses as crs
 from configparser import ConfigParser
 from os.path import expanduser, isfile, join
 from time import sleep
-
+from pmcli import output
 
 api = Mobileclient()  # Our interface to Google Music.
-
-
-def addstr(win, string):
-    """
-    Replace the contents of a window with a new string.
-      Not for anything where position matters.
-
-    Arguments:
-    win: Window on which to display the string.
-    string: String to be displayed.
-    """
-    win.erase()
-    win.addstr(trunc(string, win.getmaxyx()[1]))
-    win.refresh()
-
-
-def error_msg(win, msg):
-    """
-    Displays an error message.
-
-    Arguments:
-    win: Window on which to display the message.
-    msg: Message to be displayed.
-    """
-    addstr(win, 'Error: ' + msg + ' Enter \'h\' or \'help\' for help.')
 
 
 def hex_to_rgb(hex):
@@ -63,28 +38,28 @@ def initialize():
     outbar = crs.newwin(1, crs.COLS, crs.LINES-3, 0)  # For hints and notices.
     crs.curs_set(0)  # Hide the cursor.
 
-    config = read_config(outbar)
+    config = read_config()
 
     # Set colours.
     if 'colour' in config:
         crs.start_color()
-        init_colours(outbar, config['colour'])
+        init_colours(config['colour'])
         main.bkgdset(' ', crs.color_pair(1))
         inbar.bkgdset(' ', crs.color_pair(1))
         infobar.bkgdset(' ', crs.color_pair(2))
         outbar.bkgdset(' ', crs.color_pair(4))
 
-    main.addstr(5, int(crs.COLS/2) - 9, 'Welcome to pmcli!')
+    output.welcome_msg()
     main.refresh()
 
     # Log in to Google Play Music.
-    addstr(outbar, 'Logging in...')
-    login(outbar, config['user'])
+    output.outbar_msg('Logging in...')
+    login(config['user'])
 
     return 'colour' in config, main, inbar, infobar, outbar
 
 
-def init_colours(win, colours):
+def init_colours(colours):
     """Set curses colours."""
     try:
         crs.init_color(0, *hex_to_rgb(colours['background']))
@@ -94,7 +69,8 @@ def init_colours(win, colours):
         crs.init_color(4, *hex_to_rgb(colours['content2']))
 
     except KeyError:
-        addstr(win, 'Config file is missing one or more colours: Exiting.')
+        output.outbar_msg(
+            'Config file is missing one or more colours: Exiting.')
         leave(2)
 
     crs.init_pair(1, 1, 0)
@@ -116,7 +92,7 @@ def leave(s):
     quit()
 
 
-def login(win, user):
+def login(user):
     """
     Log in to Google Play Music.
 
@@ -127,14 +103,15 @@ def login(win, user):
         if not api.login(
                 user['email'], user['password'], user['deviceid']
         ):  # Login failed;
-            addstr(win, 'Login failed: Exiting.')
+            output.outbar_msg('Login failed: Exiting.')
             leave(2)
 
     except KeyError:  # Invalid config file.
-        addstr(win, 'Config file is missing one or more fields: Exiting.')
+        output.outbar_msg(
+            'Config file is missing one or more fields: Exiting.')
         leave(2)
 
-    addstr(win, 'Logged in as %s.' % user['email'])  # Login succeeded.
+    output.outbar_msg('Logged in as %s.' % user['email'])  # Login succeeded.
 
 
 def measure_fields(width):
@@ -168,14 +145,11 @@ def measure_fields(width):
             name_start, artist_start, album_start)
 
 
-def read_config(win):
+def read_config():
     """
     Parses a config file for login information.
       Config file should be located at '~/.config/pmcli/config'
       with a section called [auth] containing email, password, and deviceid.
-
-    Arguments:
-    win: Window on which to display output.
 
     Returns: A dict containing keys 'email', 'password', and 'deviceid'.
     """
@@ -183,7 +157,7 @@ def read_config(win):
     config = join(expanduser('~'), '.config', 'pmcli', 'config')
 
     if not isfile(config):
-        addstr(win, 'Config file not found at %s: Exiting.' % config)
+        output.outbar_msg('Config file not found at %s: Exiting.' % config)
         leave(2)
 
     parser.read(config)
@@ -195,7 +169,7 @@ def read_config(win):
             config['user'][key] = parser['auth'][key]
 
     except KeyError:  # Invalid config file.
-        addstr(win, 'Config file is missing [auth] section: Exiting.')
+        output.outbar_msg('Config file is missing [auth] section: Exiting.')
         leave(2)
 
     try:
